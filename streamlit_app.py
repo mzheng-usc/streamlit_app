@@ -5,8 +5,8 @@ from io import BytesIO
 from datetime import datetime, timedelta
 from openpyxl.styles import numbers
 
-# Optional: import your own merge logic
-from merge_excel import merge_excel_data  # Make sure merge_excel.py is in the same folder
+# Import your merging function (should be placed in merge_excel.py)
+from merge_excel import merge_excel_data
 
 st.set_page_config(page_title="📊 Excel Tools", layout="wide")
 st.title("📊 Excel Tools Dashboard")
@@ -18,7 +18,6 @@ def to_excel_bytes(df: pd.DataFrame, id_columns=None) -> bytes:
         df.to_excel(writer, index=False, na_rep="N/A")
         worksheet = writer.sheets["Sheet1"]
 
-        # Format ID columns to prevent scientific notation
         if id_columns:
             for col_idx, col_name in enumerate(df.columns, 1):
                 if col_name in id_columns:
@@ -30,54 +29,16 @@ def to_excel_bytes(df: pd.DataFrame, id_columns=None) -> bytes:
     return output.getvalue()
 
 # ---------- UI Tabs ----------
-tab1, tab2 = st.tabs(["📊 Combine Excel Files", "🧮 Get Today's Results (Beijing Time)"])
+tab1, tab2 = st.tabs([
+    "🕒 Convert Results to Beijing Time Zone", 
+    "📊 Combine Excel Files"
+])
 
 # ===============================
-# Tab 1: Combine Excel Files
+# Tab 1: Convert Timezone to Beijing
 # ===============================
 with tab1:
-    st.header("📊 Combine Excel Files")
-    uploaded_files = st.file_uploader(
-        "Upload one or more Excel files (.xlsx)",
-        type="xlsx",
-        accept_multiple_files=True
-    )
-
-    if uploaded_files:
-        try:
-            dfs = [pd.read_excel(f) for f in uploaded_files]
-            combined_df = pd.concat(dfs, ignore_index=True)
-
-            st.success(f"✅ Successfully combined {len(uploaded_files)} files.")
-            st.write(f"Total rows: {len(combined_df)}")
-            st.dataframe(combined_df.head())
-
-            # Apply formatting to ID and large-number columns
-            id_columns = ['ID', 'User ID', 'Campaign ID', 'Ad ID', 'Phone', 'Account Number']
-            large_number_columns = [
-                col for col in combined_df.columns
-                if combined_df[col].dtype in ['int64', 'float64']
-                and pd.notna(combined_df[col].max())
-                and abs(combined_df[col].max()) >= 1e10
-            ]
-            columns_to_format = list(set(id_columns + large_number_columns))
-
-            excel_data = to_excel_bytes(combined_df, id_columns=columns_to_format)
-            st.download_button(
-                label="📥 Download Combined Excel File",
-                data=excel_data,
-                file_name="combined_results.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
-
-        except Exception as e:
-            st.error(f"❌ Failed to combine files: {e}")
-
-# ===============================
-# Tab 2: Merge by Date (Beijing)
-# ===============================
-with tab2:
-    st.header("🧮 Get Full-Day Results (Beijing Time)")
+    st.header("🕒 Transfer Results to Beijing Time (UTC+8)")
 
     col1, col2 = st.columns(2)
     with col1:
@@ -94,7 +55,6 @@ with tab2:
     if st.button("🔁 Run Merge"):
         if table1_file and combined_table_file:
             try:
-                # Read table1 to infer target columns
                 table1_df = pd.read_excel(table1_file)
                 target_col_names = ["投放花费", '应用设备激活数', '付费用户数(首日)', 'd0']
                 target_col_indices = [list(table1_df.columns).index(x) for x in target_col_names if x in table1_df.columns]
@@ -122,8 +82,48 @@ with tab2:
                     file_name=output_filename,
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
-
             except Exception as e:
                 st.error(f"❌ Merge failed: {e}")
         else:
             st.warning("⚠️ Please upload both required files before merging.")
+
+# ===============================
+# Tab 2: Combine Excel Files
+# ===============================
+with tab2:
+    st.header("📊 Combine Excel Files (Row-wise)")
+
+    uploaded_files = st.file_uploader(
+        "Upload one or more Excel files (.xlsx)",
+        type="xlsx",
+        accept_multiple_files=True,
+        key="combine"
+    )
+
+    if uploaded_files:
+        try:
+            dfs = [pd.read_excel(f) for f in uploaded_files]
+            combined_df = pd.concat(dfs, ignore_index=True)
+
+            st.success(f"✅ Successfully combined {len(uploaded_files)} files.")
+            st.write(f"Total rows: {len(combined_df)}")
+            st.dataframe(combined_df.head())
+
+            id_columns = ['ID', 'User ID', 'Campaign ID', 'Ad ID', 'Phone', 'Account Number']
+            large_number_columns = [
+                col for col in combined_df.columns
+                if combined_df[col].dtype in ['int64', 'float64']
+                and pd.notna(combined_df[col].max())
+                and abs(combined_df[col].max()) >= 1e10
+            ]
+            columns_to_format = list(set(id_columns + large_number_columns))
+
+            excel_data = to_excel_bytes(combined_df, id_columns=columns_to_format)
+            st.download_button(
+                label="📥 Download Combined Excel File",
+                data=excel_data,
+                file_name="combined_results.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+        except Exception as e:
+            st.error(f"❌ Failed to combine files: {e}")
