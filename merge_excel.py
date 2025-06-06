@@ -519,15 +519,22 @@ def merge_excel_data(table1_path, combined_table_path, output_path=None, target_
     
     # Return the requested columns
     if not full_day_data.empty:
-        if target_columns is not None:
-            valid_indices = [i for i in target_columns if i < len(full_day_data.columns)]
-            if len(valid_indices) > 0:
-                selected_columns = full_day_data.iloc[:, valid_indices]
-                print(f"返回 DataFrame 包含 {len(valid_indices)} 个目标列, {len(selected_columns)} 行")
-                return selected_columns
+        # Clean up temporary columns before returning
+        return_data = full_day_data.copy()
+        if 'clean_date' in return_data.columns:
+            return_data = return_data.drop(columns=['clean_date'])
+        if 'group_id' in return_data.columns:
+            return_data = return_data.drop(columns=['group_id'])
         
-        print(f"返回完整 DataFrame, 包含 {len(full_day_data.columns)} 列, {len(full_day_data)} 行")
-        return full_day_data
+        # Re-order columns to match original format
+        original_columns = combined_table.columns.tolist()
+        output_columns = [col for col in original_columns if col in return_data.columns]
+        return_data = return_data[output_columns]
+        
+        print(f"返回完整 DataFrame, 包含 {len(return_data.columns)} 列, {len(return_data)} 行")
+        if target_columns is not None:
+            print(f"非目标数值列已设为 NA")
+        return return_data
     else:
         print("返回空 DataFrame")
         return pd.DataFrame()
