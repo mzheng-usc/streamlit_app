@@ -12,12 +12,13 @@ def merge_excel_data(table1_path, combined_table_path, output_path=None, target_
     1. Subtracts Table 1 from Combined Table (first_date) to get midnight-to-3pm data
     2. Combines rows with the same group ID that appear in both midnight-to-3pm and second_date data
     3. Keeps rows that only appear in one dataset
+    4. Preserves all columns but sets non-target numeric columns to NA
     
     Parameters:
     - table1_path: Path to Excel file with data from 3pm to midnight on first_date
     - combined_table_path: Path to Excel file with combined data
     - output_path: Optional path to save the resulting DataFrame
-    - target_columns: Optional list of column indices to save in the output file
+    - target_columns: Optional list of column indices to preserve values for (others set to NA)
     - perform_sanity_check: Whether to perform and print a sanity check
     - first_date: First date to process (e.g., '2025-05-20'). If None, defaults to '2025-05-20'
     - second_date: Second date to process (e.g., '2025-05-21'). If None, defaults to day after first_date
@@ -278,18 +279,46 @@ def merge_excel_data(table1_path, combined_table_path, output_path=None, target_
             full_day_data = pd.DataFrame()  # Empty dataframe if both are empty
             print("\n警告: 两个数据集都为空!")
     
+    # Apply NA filtering to non-target columns if target_columns is specified
+    if target_columns is not None and not full_day_data.empty:
+        print(f"\n应用目标列过滤: 保留 {len(target_columns)} 个目标列的值, 其他数值列设为 NA")
+        
+        # Create a mask for non-target columns
+        all_columns = list(range(len(full_day_data.columns)))
+        non_target_columns = [col_idx for col_idx in all_columns if col_idx not in target_columns]
+        
+        # Get the column names for non-target columns
+        non_target_column_names = [full_day_data.columns[i] for i in non_target_columns]
+        
+        # Filter to only numeric columns among the non-target columns
+        numeric_non_target_cols = [col for col in non_target_column_names 
+                                  if pd.api.types.is_numeric_dtype(full_day_data[col])]
+        
+        print(f"将 {len(numeric_non_target_cols)} 个非目标数值列设为 NA")
+        print(f"非目标数值列: {numeric_non_target_cols[:5]}{'...' if len(numeric_non_target_cols) > 5 else ''}")
+        
+        # Set all numeric non-target columns to NA
+        for col in numeric_non_target_cols:
+            full_day_data[col] = np.nan
+    
     # Print summary statistics
     print("\n完整天数据统计:")
     if '投放花费' in full_day_data.columns:
-        print(f"总投放花费: {full_day_data['投放花费'].sum():.2f}")
+        total_cost = full_day_data['投放花费'].sum()
+        if not pd.isna(total_cost):
+            print(f"总投放花费: {total_cost:.2f}")
+        else:
+            print("总投放花费: NA (由于目标列过滤)")
     
     if 'revenue(生命周期)' in full_day_data.columns and '投放花费' in full_day_data.columns:
         total_revenue = full_day_data['revenue(生命周期)'].sum()
         total_cost = full_day_data['投放花费'].sum()
-        if total_cost > 0:
+        if not pd.isna(total_revenue) and not pd.isna(total_cost) and total_cost > 0:
             roi = total_revenue / total_cost
             print(f"总收入: {total_revenue:.2f}")
             print(f"ROI: {roi:.2f}")
+        else:
+            print("ROI: NA (由于目标列过滤或数据不可用)")
     
     # Count unique group IDs
     unique_groups = full_day_data['group_id'].nunique()
@@ -414,18 +443,21 @@ def merge_excel_data(table1_path, combined_table_path, output_path=None, target_
                                      str(final_vals.get('d0', "N/A")),
                                      str(final_vals.get('应用设备激活数', "N/A"))))
             
-            # Verify the calculation is correct
+            # Verify the calculation is correct (skip if values are NA due to filtering)
             expected_vals = combined_vals if 'combined_vals' in locals() else midnight_vals
             verification_ok = True
             
             print("\n计算验证:")
             for col in available_cols:
                 if col in expected_vals and col in final_vals:
-                    is_correct = abs(expected_vals[col] - final_vals[col]) < 0.001
-                    if not is_correct:
-                        verification_ok = False
-                    print(f"{col}: 期望值 = {expected_vals[col]}, 实际值 = {final_vals[col]}, " +
-                          f"{'✓ 正确' if is_correct else '✗ 错误'}")
+                    if not pd.isna(final_vals[col]):
+                        is_correct = abs(expected_vals[col] - final_vals[col]) < 0.001
+                        if not is_correct:
+                            verification_ok = False
+                        print(f"{col}: 期望值 = {expected_vals[col]}, 实际值 = {final_vals[col]}, " +
+                              f"{'✓ 正确' if is_correct else '✗ 错误'}")
+                    else:
+                        print(f"{col}: 实际值 = NA (由于目标列过滤)")
             
             if verification_ok:
                 print("\n✅ 所有计算验证通过, 数据处理正确!")
@@ -452,19 +484,7 @@ def merge_excel_data(table1_path, combined_table_path, output_path=None, target_
         output_columns = [col for col in original_columns if col in output_data.columns]
         output_data = output_data[output_columns]
         
-        # Apply target columns filtering if specified
-        if target_columns is not None:
-            # Make sure target_columns are valid
-            valid_indices = [i for i in target_columns if i < len(output_data.columns)]
-            if len(valid_indices) > 0:
-                # Show which columns we're saving
-                target_column_names = [output_data.columns[i] for i in valid_indices]
-                print(f"仅保存 {len(valid_indices)} 个目标列: {target_column_names}")
-                output_data = output_data.iloc[:, valid_indices]
-            else:
-                print("警告: 提供的目标列索引无效, 保存所有列")
-        else:
-            print("未指定目标列, 保存所有列")
+        print(f"保存所有 {len(output_data.columns)} 列 (包含NA值的非目标列)")
         
         # Set the final output date (use the day after second_date for the result)
         next_day = second_dt + timedelta(days=1)
